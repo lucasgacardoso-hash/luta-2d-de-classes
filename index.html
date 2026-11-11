@@ -483,4 +483,210 @@ joy.onpointerup=joy.onpointercancel=()=>{mv={x:0,y:0};kn.style.left=kn.style.top
 const held={},km={j:'a',k:'k',l:'l',i:'i',u:'u'};
 onkeydown=e=>{const k=e.key.toLowerCase();if(k=='m'&&!e.repeat)tm();if(km[k]&&!e.repeat)pr.push([km[k],...ad()]);held[k]=1;kv()};onkeyup=e=>{held[e.key.toLowerCase()]=0;kv()};
 function kv(){mv={x:(held.d||held.arrowright?1:0)-(held.a||held.arrowleft?1:0),y:(held.s||held.arrowdown?1:0)-(held.w||held.arrowup?1:0)}}
+// ===== PROTER (cole no fim do <script>) =====
+(()=>{
+// ajustes: rg=segundos para o escudo voltar · s1=stun ao quebrar o escudo normal · s2=stun ao quebrar o extra
+//          dmg=dano do ataque · xmax=máximo de escudos extras acumulados
+const PRT={rg:10,s1:2,s2:3,dmg:5,xmax:99};
+
+// ---- cadastro do personagem ----
+C.proter=[50,150,'#3ad',100/6];               // vida, velocidade, cor, ult/s (6s)
+INF.proter='Escudo que anula 1 golpe e atordoa · ult: escudo extra que devolve o dano';
+AU.proter=['#6df',-20];
+PF.proter=45; MK.push('proter');               // IA: luta corpo a corpo
+K.push('proter');
+
+// ---- sons ----
+SF.sb=()=>{tn(1400,.25,'square',.08,300);nz(.2,.15,4000,'bandpass',1200)};          // escudo quebrou
+SF.sx=()=>{tn(300,.15,'sawtooth',.12,900);tn(1200,.2,'triangle',.1,400,.05)};       // reflexo
+SF.sg=()=>{tn(660,.12,'sine',.08);tn(990,.2,'sine',.08,0,.08)};                     // escudo voltou / ganhou
+SF.st=()=>{tn(200,.3,'square',.1,80);tn(120,.3,'sawtooth',.08,60,.05)};             // stun
+
+// ---- efeitos visuais dos eventos ----
+const _EV=EV;
+EV=function(e){_EV(e);const[k,px,py]=e;
+ if(k=='sb'){spark(px,py,'#8ef',22,230,.6,3);rg(px,py,'#8ef',60)}
+ else if(k=='sx'){spark(px,py,'#fd4',30,300,.7,3);rg(px,py,'#fd4',90);shk=Math.max(shk,5)}
+ else if(k=='sg'){spark(px,py,'#8ef',10,100,.5,3);rg(px,py,'#8ef',34)}
+ else if(k=='st'){spark(px,py,'#fd4',12,150,.5,3)}};
+
+// ---- estado inicial ----
+const _mk=mk;
+mk=function(i,c){const p=_mk(i,c);p.stn=0;if(c=='proter'){p.sh=1;p.shc=0;p.xs=0}return p};
+
+// ---- stun (zera os controles do alvo enquanto durar) ----
+function stun(t,n){if(t.god>0||t.ig>0)return;t.stn=Math.max(t.stn||0,n);E('st',t.x,t.y,0,t.i)}
+
+// ---- escudos: extra quebra primeiro (reflete + stun s2); depois o normal (stun s1) ----
+const _hit=hit;
+hit=function(s,t,d,rf){
+ if(t.c=='proter'&&s.over<0&&!(t.god>0)){
+  const a=s.p[1-t.i];
+  if(t.xs>0){t.xs--;t.ig=.05;E('sx',t.x,t.y,0,t.i);_hit(s,a,d);stun(a,PRT.s2);return 0}
+  if(t.sh>0){t.sh=0;t.shc=PRT.rg;t.ig=.05;E('sb',t.x,t.y,0,t.i);stun(a,PRT.s1);return 0}
+ }
+ return _hit(s,t,d)};
+
+// ---- ataque e ult ----
+const _act=act;
+act=function(s,p,o,k,ax,ay){
+ if(p.c!='proter')return _act(s,p,o,k,ax,ay);
+ if(k=='a'){if(p.cd>0)return;p.cd=.5;melee(s,p,o,PRT.dmg);return}
+ if(k=='u'&&p.ult>=100){_act(s,p,o,k,ax,ay);p.xs=Math.min(PRT.xmax,p.xs+1);E('sg',p.x,p.y,0,p.i)}};
+
+// ---- tempo: stun e regeneração do escudo ----
+const _step=step;
+step=function(s,dt,I){
+ s.p.forEach((p,i)=>{if(p.stn>0){I[i].mx=0;I[i].my=0;I[i].pr=[]}});
+ _step(s,dt,I);
+ s.p.forEach(p=>{
+  if(p.stn>0)p.stn-=dt;
+  if(p.c=='proter'&&!p.sh&&(p.shc-=dt)<=0){p.sh=1;E('sg',p.x,p.y,0,p.i)}})};
+
+// ---- IA usa a ult do proter assim que carrega ----
+const _ai=aiStep;
+aiStep=function(s,dt){_ai(s,dt);const p=s.p[1];
+ if(p.c=='proter'&&p.ult>=100&&!(p.stn>0)&&!(p.fz>0))in1.pr.push(['u'])};
+
+// ---- desenho: bolha, recarga, escudos extras orbitando e estrelas de stun ----
+const _draw=draw;
+draw=function(dt){_draw(dt);
+ if(!S||!S.p||S.over>=0)return;
+ S.p.forEach((p,i)=>{const v=VP[i],t=S.t;
+  if(p.c=='proter'){
+   if(p.sh){x.globalAlpha=.14;x.fillStyle='#6df';x.beginPath();x.arc(v.x,v.y,24,0,7);x.fill();
+    x.globalAlpha=.65+.2*Math.sin(t*6);x.strokeStyle='#8ef';x.lineWidth=3;x.stroke();x.globalAlpha=1}
+   else{x.globalAlpha=.6;x.strokeStyle='#8ef';x.lineWidth=2;x.beginPath();
+    x.arc(v.x,v.y,24,-Math.PI/2,-Math.PI/2+6.283*Math.max(0,Math.min(1,1-p.shc/PRT.rg)));x.stroke();x.globalAlpha=1}
+   const n=Math.min(p.xs||0,10);
+   for(let k=0;k<n;k++){const a=t*2.5+k*6.283/n;cir(v.x+Math.cos(a)*31,v.y+Math.sin(a)*31,5,'#fd4');cir(v.x+Math.cos(a)*31,v.y+Math.sin(a)*31,2.2,'#fff')}}
+  if(p.stn>0){x.font='bold 14px system-ui';x.textAlign='center';x.fillStyle='#fd4';
+   for(let k=0;k<3;k++){const a=t*5+k*2.09;x.fillText('★',v.x+Math.cos(a)*14,v.y-27+Math.sin(a)*4)}x.textAlign='left'}})};
+
+// ---- card de seleção ----
+const k='proter',b=document.createElement('div');b.className='cd';b.style.setProperty('--c',C[k][2]);
+b.innerHTML=`<span class=o></span><b>${k}</b><small>${INF[k]}</small><em>❤ ${C[k][0]} · ➤ ${C[k][1]}</em>`;
+b.onclick=()=>{au();SF.ui();picks[me]=k;if(vsAI&&!picks[1])picks[1]=K[Math.floor(Math.random()*K.length)];send({t:'pick',c:k});$('ps').textContent='Você: '+k+' — aguardando o oponente...';
+ document.querySelectorAll('.cd').forEach(c=>c.classList.toggle('on',c==b));chk()};
+$('ch').appendChild(b);
+})();
+// ===== GUEPARDO (cole no fim do <script>) =====
+(()=>{
+// cd=intervalo do ataque · r/rU=alcance da onda normal/na ult · sp=px/s que a onda cresce
+// dmg=dano · bonus=dano extra na ult · ubonus=velocidade extra na ult · ud=duração da ult (s)
+// near=distância (px) da parede que conta como "perto" · min=segundos mínimos junto à parede para virar impulso
+// max=máx. de segundos acumulados · per=px de impulso por segundo acumulado · dsp=velocidade do impulso
+const GP={cd:.5,r:130,rU:220,sp:900,dmg:5,bonus:5,ubonus:300,ud:8,near:22,min:.4,max:3,per:240,dsp:1800};
+let gid=0;const LW={};
+
+// ---- cadastro do personagem ----
+C.guepardo=[50,400,'#fb3',100/6];              // vida, velocidade, cor, ult/s (6s)
+INF.guepardo='Onda circular rápida que ignora terreno · perto da parede vira impulso · ult: mais veloz e ondas maiores';
+AU.guepardo=['#fb3',-10];
+PF.guepardo=95; MK.push('guepardo');           // IA: luta de perto
+K.push('guepardo');
+
+// ---- sons ----
+SF.gw=()=>{nz(.18,.14,3200,'bandpass',600);tn(500,.12,'sine',.07,900)};
+SF.gd=()=>{nz(.25,.18,5000,'bandpass',500);tn(300,.25,'sawtooth',.08,1400)};
+
+// ---- auxiliares ----
+// normal da parede da arena mais próxima (null se não estiver perto de nenhuma)
+function wallN(p){let nx=0,ny=0;
+ if(p.x<=15+GP.near)nx++;if(p.x>=W-15-GP.near)nx--;if(p.y<=15+GP.near)ny++;if(p.y>=H-15-GP.near)ny--;
+ const l=Math.hypot(nx,ny);return l?{x:nx/l,y:ny/l}:null}
+// direção do impulso: última direção de movimento; se apontar para a parede, rebate para fora
+function dDir(p){const n=wallN(p);let dx=p.fx||1,dy=p.fy||0;const l=Math.hypot(dx,dy)||1;dx/=l;dy/=l;
+ if(n){const d=dx*n.x+dy*n.y;if(d<0){dx-=2*d*n.x;dy-=2*d*n.y}}return[dx,dy]}
+
+// ---- efeitos dos eventos ----
+const _EV=EV;
+EV=function(e){_EV(e);const[k,px,py,v]=e;
+ if(k=='gw'){spark(px,py,'#fb3',v?26:14,v?320:200,.4,3);if(v)shk=Math.max(shk,3)}
+ else if(k=='gd'){spark(px,py,'#fd4',24,260,.5,3);rg(px,py,'#fd4',60)}};
+
+// ---- estado inicial ----
+const _mk=mk;
+mk=function(i,c){const p=_mk(i,c);if(c=='guepardo'){p.ua=0;p.wc=0;p.ds=0;p.ddx=0;p.ddy=0}return p};
+
+// ---- ataque (onda + impulso) e ult ----
+const _act=act;
+act=function(s,p,o,k,ax,ay){
+ if(p.c!='guepardo')return _act(s,p,o,k,ax,ay);
+ s.gw=s.gw||[];
+ if(k=='a'){
+  if(p.cd>0||p.ds>0)return;
+  p.cd=GP.cd;const u=p.ua>0;
+  s.gw.push({id:++gid,x:Math.round(p.x),y:Math.round(p.y),o:p.i,r:10,mr:u?GP.rU:GP.r,d:GP.dmg+(u?GP.bonus:0),h:0});
+  E('gw',p.x,p.y,u?1:0,p.i);
+  // perto da parede há tempo suficiente: a onda também vira impulso
+  if(wallN(p)&&p.wc>=GP.min){const[dx,dy]=dDir(p);
+   p.ddx=dx;p.ddy=dy;p.ds=Math.min(GP.max,p.wc)*GP.per/GP.dsp;p.wc=0;E('gd',p.x,p.y,0,p.i)}
+  return}
+ if(k=='u'&&p.ult>=100&&p.ua<=0){_act(s,p,o,k,ax,ay);p.ua=GP.ud;p.ult=99.9}};
+
+// ---- tempo: impulso, carga na parede, bônus de velocidade da ult e ondas ----
+const _step=step;
+step=function(s,dt,I){
+ s.gw=s.gw||[];
+ s.p.forEach((p,i)=>{if(p.c=='guepardo'&&p.ds>0){I[i].mx=0;I[i].my=0}});
+ _step(s,dt,I);
+ const M=MAPS[s.map];
+ s.p.forEach((p,i)=>{if(p.c!='guepardo')return;
+  const inp=I[i];
+  if(p.stn>0||p.fz>0||p.pull>0)p.ds=0;
+  if(p.ds>0){const st=Math.min(p.ds,dt);mvp(p,p.ddx*GP.dsp*st,p.ddy*GP.dsp*st,M);p.ds-=dt;p.fx=p.ddx;p.fy=p.ddy}
+  else{
+   p.wc=wallN(p)?Math.min(GP.max,p.wc+dt):0;
+   if(p.ua>0){const l=Math.hypot(inp.mx,inp.my);
+    if(l>.1&&!(p.stn>0)&&p.fz<=0&&p.pull<=0&&p.dg<=0){const sp=GP.ubonus*(p.sl>0?.5:1)*dt;mvp(p,inp.mx/l*sp,inp.my/l*sp,M)}}}
+  // a barra de ult drena enquanto a ult dura; só volta a carregar depois que acaba
+  if(p.ua>0){p.ua-=dt;p.ult=p.ua>0?Math.min(99.9,100*p.ua/GP.ud):0}});
+ // ondas: crescem, ignoram terreno, acertam uma vez e somem
+ s.gw=s.gw.filter(w=>{w.r+=GP.sp*dt;const e=s.p[1-w.o];
+  if(!w.h&&D(w,e)<=w.r+15){w.h=1;hit(s,e,w.d)}
+  return w.r<w.mr})};
+
+// ---- IA: ataca ao alcance da onda e usa a ult quando carrega ----
+const _ai=aiStep;
+aiStep=function(s,dt){_ai(s,dt);const p=s.p[1],e=s.p[0];
+ if(p.c!='guepardo'||p.fz>0||p.stn>0||p.ds>0)return;
+ const d=D(p,e);
+ if(p.cd<=0&&d<(p.ua>0?GP.rU:GP.r)-30)in1.pr.push(['a']);
+ if(p.ult>=100&&d<350)in1.pr.push(['u'])};
+
+// ---- desenho ----
+const _draw=draw;
+draw=function(dt){_draw(dt);
+ if(!S||!S.p||S.over>=0)return;
+ x.globalCompositeOperation='lighter';
+ const live={};
+ (S.gw||[]).forEach(w=>{live[w.id]=1;let r=w.r;
+  if(me!=0){const t0=LW[w.id]||(LW[w.id]=performance.now());r=Math.min(w.mr,(performance.now()-t0)/1000*GP.sp+10)} // visitante anima localmente
+  if(r>=w.mr)return;
+  const q=Math.max(0,1-r/w.mr),u=w.mr>GP.r;
+  x.globalAlpha=.2*q;x.fillStyle=u?'#fd4':'#fb3';x.beginPath();x.arc(w.x,w.y,r,0,7);x.fill();
+  x.globalAlpha=.4+.6*q;x.strokeStyle=u?'#ff8':'#fb3';x.lineWidth=3+7*q;x.beginPath();x.arc(w.x,w.y,r,0,7);x.stroke();
+  x.strokeStyle='#fff';x.lineWidth=1.5+2*q;x.beginPath();x.arc(w.x,w.y,r,0,7);x.stroke()});
+ for(const k in LW)if(!live[k])delete LW[k];
+ x.globalCompositeOperation='source-over';x.globalAlpha=1;
+ S.p.forEach((p,i)=>{if(p.c!='guepardo')return;const v=VP[i];
+  if(p.ua>0){ // ult: aura e rastro
+   x.globalAlpha=.5+.3*Math.sin(S.t*10);x.strokeStyle='#fb3';x.lineWidth=3;x.beginPath();x.arc(v.x,v.y,22,0,7);x.stroke();x.globalAlpha=1;
+   if(Math.random()<dt*50)PT.push({x:v.x,y:v.y,vx:0,vy:0,l:.25,m:.25,c:'#fb3',z:11})}
+  if(p.ds>0)for(let k=0;k<3;k++)PT.push({x:v.x+R(-6,6),y:v.y+R(-6,6),vx:R(-30,30),vy:R(-30,30),l:.35,m:.35,c:'#fd4',z:7});
+  if(p.wc>.05){ // carga junto à parede
+   x.globalAlpha=.9;x.strokeStyle=p.wc>=GP.min?'#fd4':'#a85';x.lineWidth=3;x.beginPath();
+   x.arc(v.x,v.y,21,-Math.PI/2,-Math.PI/2+6.283*Math.min(1,p.wc/GP.max));x.stroke();x.globalAlpha=1;
+   if(i==me&&p.wc>=GP.min){const[dx,dy]=dDir(p),len=Math.min(GP.max,p.wc)*GP.per,
+     ex=Math.max(15,Math.min(W-15,v.x+dx*len)),ey=Math.max(15,Math.min(H-15,v.y+dy*len));
+    x.save();x.setLineDash([6,8]);x.strokeStyle='#fd4';x.globalAlpha=.55;x.lineWidth=2;x.beginPath();x.moveTo(v.x,v.y);x.lineTo(ex,ey);x.stroke();x.restore()}}})};
+
+// ---- card de seleção ----
+const k='guepardo',b=document.createElement('div');b.className='cd';b.style.setProperty('--c',C[k][2]);
+b.innerHTML=`<span class=o></span><b>${k}</b><small>${INF[k]}</small><em>❤ ${C[k][0]} · ➤ ${C[k][1]}</em>`;
+b.onclick=()=>{au();SF.ui();picks[me]=k;if(vsAI&&!picks[1])picks[1]=K[Math.floor(Math.random()*K.length)];send({t:'pick',c:k});$('ps').textContent='Você: '+k+' — aguardando o oponente...';
+ document.querySelectorAll('.cd').forEach(c=>c.classList.toggle('on',c==b));chk()};
+$('ch').appendChild(b);
+})();
 </script></body></html>

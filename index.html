@@ -949,4 +949,72 @@ bt.onclick=()=>{au();SF.ui();vsAI=true;me=0;conn=null;if(peer){peer.destroy();pe
 const ab=[...$('m').querySelectorAll('button')].find(b=>(b.getAttribute('onclick')||'').includes("'ai'"));
 if(ab)ab.after(document.createElement('br'),bt);else $('m').appendChild(bt);
 })();
+// ===== AJUSTE PARA CELULAR =====
+(()=>{
+// ---- CSS: menus rolam, cards e torneio cabem na tela, tamanhos baseados na área realmente visível ----
+const sty=document.createElement('style');
+sty.textContent=`
+html,body{height:100%;overscroll-behavior:none;-webkit-tap-highlight-color:transparent;-webkit-touch-callout:none}
+body{min-height:100vh;min-height:100dvh}
+#m,#p{max-height:100vh;max-height:100dvh;overflow-y:auto;touch-action:pan-y;-webkit-overflow-scrolling:touch}
+#tn{overflow-y:auto;touch-action:pan-y;justify-content:flex-start!important}
+#tn>:first-child{margin-top:auto}
+#tn>:last-child{margin-bottom:auto}
+.tm{width:min(118px,calc((100vw - 48px)/3))}
+#fs{display:none;position:fixed;bottom:10px;left:50%;margin-left:26px;width:38px;height:38px;padding:0;font-size:18px;border-radius:50%;background:#0008;z-index:25}
+#rot{display:none;position:fixed;top:8px;left:0;right:0;text-align:center;font-size:13px;opacity:.7;pointer-events:none;z-index:4}
+@media (max-width:700px){
+ .cd{width:calc(50% - 14px);max-width:170px;margin:4px;padding:10px 6px}
+ .cd small{min-height:0;font-size:11px}
+ .cd .o{width:34px;height:34px;margin-bottom:6px}
+}
+@media (max-width:420px){
+ .tb{gap:8px}
+ .tm div{font-size:11px;padding:4px}
+}
+@media (max-height:520px){
+ h1{font-size:34px;margin:6px 0;letter-spacing:4px}
+ #m p{margin:3px 0}
+ #m button,#m input,#tn button{padding:8px 14px;font-size:16px}
+ .cd{width:128px;max-width:none;padding:8px 6px}
+ #tn h2{font-size:20px}
+ #tn p{margin:0 0 6px;font-size:12px}
+ .tm div{padding:3px 6px;font-size:12px}
+ .tb{margin-bottom:6px}
+ .tc{gap:5px}
+}`;
+document.head.appendChild(sty);
+
+// ---- botões de tela cheia (só em aparelho de toque) e aviso para girar o celular ----
+const touch=matchMedia('(pointer:coarse)').matches;
+const fsb=document.createElement('button');fsb.id='fs';fsb.textContent='⛶';
+fsb.onclick=()=>{au();SF.ui();const d=document.documentElement;
+ if(document.fullscreenElement){document.exitFullscreen();return}
+ d.requestFullscreen().then(()=>screen.orientation&&screen.orientation.lock&&screen.orientation.lock('landscape')).catch(()=>{})};
+document.body.appendChild(fsb);
+if(touch&&document.documentElement.requestFullscreen)fsb.style.display='block';
+const rot=document.createElement('div');rot.id='rot';rot.textContent='🔄 Gire o celular para jogar em tela maior';
+document.body.appendChild(rot);
+
+// ---- botões de ação escalam com a tela (posições originais × s) ----
+const BP={a:[20,100],k:[90,150],l:[160,100],i:[90,60],u:[20,30]};
+function layB(s){document.querySelectorAll('.b').forEach(b=>{const p=BP[b.dataset.k];if(!p)return;
+ b.style.width=b.style.height=56*s+'px';b.style.right=p[0]*s+'px';b.style.bottom=p[1]*s+'px';b.style.fontSize=13*s+'px'})}
+
+// ---- o jogo ocupa o maior 16:9 que cabe na área VISÍVEL (sem depender de vh) ----
+function fit(){
+ const vv=window.visualViewport,w=vv?vv.width:innerWidth,h=vv?vv.height:innerHeight,
+  cw=Math.min(w,h*16/9),ch=cw*9/16,por=h>w;
+ cv.style.width=cw+'px';cv.style.height=ch+'px';
+ cv.style.marginTop=(por?Math.max(0,(h-ch-190)/2):Math.max(0,(h-ch)/2))+'px';   // retrato: sobra espaço para os controles embaixo
+ layB(Math.max(.8,Math.min(1,Math.min(w/460,h/520))));
+ rot.style.display=touch&&por&&cv.style.display=='block'?'block':'none'}
+addEventListener('resize',fit);
+addEventListener('orientationchange',()=>setTimeout(fit,200));
+if(window.visualViewport)visualViewport.addEventListener('resize',fit);
+// reajusta ao entrar e sair de uma luta
+const _play=play;play=function(){_play();fit()};
+const _reset=reset;reset=function(){_reset();fit()};
+fit();
+})();
 </script></body></html>

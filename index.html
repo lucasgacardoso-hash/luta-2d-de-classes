@@ -689,4 +689,264 @@ b.onclick=()=>{au();SF.ui();picks[me]=k;if(vsAI&&!picks[1])picks[1]=K[Math.floor
  document.querySelectorAll('.cd').forEach(c=>c.classList.toggle('on',c==b));chk()};
 $('ch').appendChild(b);
 })();
+// ===== MONGE =====
+(()=>{
+// ajustes: cd=intervalo do ataque · range=alcance do empurrão · dmg=dano · dist=distância empurrada · psp=velocidade do empurrão (px/s)
+//          wdmg=dano extra ao bater na parede/borda · wsp=velocidade EXTRA do monge · wt=duração desse bônus (s)
+//          wr=alcance do ataque contra paredes · pr=alcance do ataque sobre pedaços · pps=velocidade dada aos pedaços · fr=atrito dos pedaços
+//          pdmg=dano do pedaço no inimigo · bt=segundos para a borda fechar/abrir · hw/hh=meia-largura/meia-altura do espaço mínimo
+const MG={cd:.6,range:100,dmg:10,dist:320,psp:1500,wdmg:5,wsp:600,wt:2,wr:70,pr:120,pps:900,fr:2.3,pdmg:3,bt:2.5,hw:70,hh:45};
+let pid=0;
+const ORIG=[],og=m=>ORIG[m]||(ORIG[m]=MAPS[m].o.map(r=>r.slice())); // paredes originais de cada mapa (guardadas no 1º uso, vale para mapas adicionados depois)
+let sk='';
+
+// ---- cadastro do personagem ----
+C.monge=[50,150,'#6fc',25];                     // vida, velocidade, cor, ult/s (4s)
+INF.monge='Empurra o rival com força · quebra paredes em pedaços · ult: fecha e reabre a borda do mapa';
+AU.monge=['#6fc',-15];
+PF.monge=60; MK.push('monge');                  // IA: luta de perto
+K.push('monge');
+
+// ---- sons ----
+SF.mp=()=>{nz(.12,.2,900,'lowpass',200);tn(160,.18,'square',.12,60)};
+SF.mb=()=>{nz(.25,.22,2500,'bandpass',300);tn(220,.2,'sawtooth',.1,60)};
+SF.mw=()=>{tn(90,.3,'square',.16,40);nz(.2,.2,1200,'lowpass',150)};
+SF.mu=()=>{tn(70,.9,'sawtooth',.14,200);nz(.8,.2,200,'lowpass',1800)};
+
+// ---- efeitos dos eventos ----
+const _EV=EV;
+EV=function(e){_EV(e);const[k,px,py]=e;
+ if(k=='mp'){spark(px,py,'#9fd',14,260,.35,3);rg(px,py,'#9fd',50)}
+ else if(k=='mb'){spark(px,py,'#ba9',30,260,.7,4);rg(px,py,'#9fd',70);shk=Math.max(shk,4)}
+ else if(k=='mw'){spark(px,py,'#fd4',26,320,.6,4);rg(px,py,'#fd4',80);shk=Math.max(shk,7)}};
+
+// ---- auxiliares ----
+// sincroniza as paredes do mapa com as quebradas (s.wk = índices das paredes originais destruídas); vale para host e visitante
+function sync(s){const wk=s.wk||[],key=s.map+':'+wk.join(',');if(key===sk)return;sk=key;
+ MAPS[s.map].o=og(s.map).filter((r,i)=>!wk.includes(i));delete BG[s.map]}
+// quebra uma parede em 10 pedaços
+function breakWall(s,r){const ix=og(s.map).findIndex(q=>q[0]==r[0]&&q[1]==r[1]);s.wk=s.wk||[];s.pc=s.pc||[];
+ if(ix<0||s.wk.includes(ix))return;
+ s.wk.push(ix);sync(s);
+ const[a,b,w,h]=r,hz=w>=h,cn=hz?5:2,rn=hz?2:5,pw=w/cn,ph=h/rn;
+ for(let i=0;i<cn;i++)for(let j=0;j<rn;j++){const x0=a+pw*(i+.5),y0=b+ph*(j+.5),ang=Math.atan2(y0-(b+h/2),x0-(a+w/2))+R(-.5,.5),v=R(40,120);
+  s.pc.push({id:++pid,x:x0,y:y0,w:pw,h:ph,vx:Math.cos(ang)*v,vy:Math.sin(ang)*v,o:-1})}
+ E('mb',a+w/2,b+h/2,0,0)}
+// ult: alterna entre fechar a borda (espaço minúsculo) e reabrir
+function toggle(s){const cur=s.bd||[0,0,W,H],shrink=!s.bs;s.bs=shrink?1:0;
+ s.b0=cur.slice();s.b1=shrink?[W/2-MG.hw,H/2-MG.hh,W/2+MG.hw,H/2+MG.hh]:[0,0,W,H];s.bq=0}
+// move o alvo empurrado em um passo curto; devolve 1 se bateu em parede/borda
+function pmv(p,u,M,B){let h=0;
+ const tx=p.x+p.pdx*u,cx=Math.max(B[0]+15,Math.min(B[2]-15,tx));
+ if(cx!=tx&&Math.abs(p.pdx)>.05)h=1;
+ if(blk(M,cx,p.y)){if(Math.abs(p.pdx)>.05)h=1}else p.x=cx;
+ const ty=p.y+p.pdy*u,cy=Math.max(B[1]+15,Math.min(B[3]-15,ty));
+ if(cy!=ty&&Math.abs(p.pdy)>.05)h=1;
+ if(blk(M,p.x,cy)){if(Math.abs(p.pdy)>.05)h=1}else p.y=cy;
+ return h}
+
+// ---- estado inicial ----
+const _mk=mk;
+mk=function(i,c){const p=_mk(i,c);p.pd=0;p.pdx=0;p.pdy=0;p.pw=-1;p.mb=0;return p};
+
+// ---- ataque e ult ----
+const _act=act;
+act=function(s,p,o,k,ax,ay){
+ if(p.c!='monge')return _act(s,p,o,k,ax,ay);
+ if(k=='u'&&p.ult>=100){_act(s,p,o,k,ax,ay);toggle(s);E('mu',p.x,p.y,0,p.i);return}
+ if(k!='a'||p.cd>0)return;
+ p.cd=MG.cd;
+ const M=MAPS[s.map];
+ let dx=ax!=null&&ay!=null?ax:p.fx,dy=ax!=null&&ay!=null?ay:p.fy;const dl=Math.hypot(dx,dy)||1;dx/=dl;dy/=dl;
+ s.fx.push({x:p.x+dx*30,y:p.y+dy*30,t:s.t+.15,r:30,c:'#fff',a:Math.atan2(dy,dx),k:C.monge[2]});E('sw',p.x+dx*30,p.y+dy*30,0,p.i);
+ // inimigo: dano + empurrão
+ const d=D(p,o);
+ if(d<MG.range&&hit(s,o,MG.dmg)){const l=d||1,ux=d>1?(o.x-p.x)/l:dx,uy=d>1?(o.y-p.y)/l:dy;
+  o.pd=MG.dist;o.pdx=ux;o.pdy=uy;o.pw=p.i;E('mp',o.x,o.y,0,p.i)}
+ // minions do rival (igual ao corpo a corpo)
+ s.mn.forEach(m=>{if(m.o==o.i&&m.k!='ghost'&&m.k!='sword'&&D(p,m)<60){m.hp=0;if(m.k=='clone')hit(s,p,10)}});
+ // pedaços de parede à frente são empurrados
+ (s.pc=s.pc||[]).forEach(c=>{const rx=c.x-p.x,ry=c.y-p.y,l=Math.hypot(rx,ry)||1;
+  if(l<MG.pr&&(l<35||(rx*dx+ry*dy)/l>.3)){c.vx=dx*MG.pps;c.vy=dy*MG.pps;c.o=p.i}});
+ // parede à frente quebra (a mais próxima)
+ let best=null,bd=1e9;
+ M.o.forEach(r=>{const cx=Math.max(r[0],Math.min(p.x,r[0]+r[2])),cy=Math.max(r[1],Math.min(p.y,r[1]+r[3])),dd=Math.hypot(cx-p.x,cy-p.y);
+  if(dd>MG.wr)return;const l=dd||1,dot=((cx-p.x)*dx+(cy-p.y)*dy)/l;
+  if(dd>22&&dot<.3)return;if(dd<bd){bd=dd;best=r}});
+ if(best)breakWall(s,best)};
+
+// ---- tempo: borda, empurrão, bônus de velocidade e pedaços ----
+const _step=step;
+step=function(s,dt,I){
+ sync(s);s.pc=s.pc||[];
+ s.p.forEach((p,i)=>{if(p.pd>0){I[i].mx=0;I[i].my=0}});   // quem está sendo empurrado não controla
+ _step(s,dt,I);
+ const M=MAPS[s.map];
+ // borda do mapa (animação)
+ if(s.b0&&s.bq<1){s.bq=Math.min(1,s.bq+dt/MG.bt);s.bd=s.b0.map((v,i)=>Math.round((v+(s.b1[i]-v)*s.bq)*10)/10)}
+ const B=s.bd||[0,0,W,H],full=B[0]<=.5&&B[1]<=.5&&B[2]>=W-.5&&B[3]>=H-.5;
+ // a borda esmaga as paredes que alcança
+ if(!full)M.o.slice().forEach(r=>{if(r[0]<B[0]+30||r[1]<B[1]+30||r[0]+r[2]>B[2]-30||r[1]+r[3]>B[3]-30)breakWall(s,r)});
+ s.p.forEach((p,i)=>{
+  // bônus de velocidade do monge
+  if(p.mb>0){p.mb-=dt;
+   if(p.c=='monge'&&p.pd<=0){const inp=I[i],l=Math.hypot(inp.mx,inp.my);
+    if(l>.1&&!(p.stn>0)&&p.fz<=0&&p.pull<=0&&p.dg<=0){const sp=MG.wsp*(p.sl>0?.5:1)*dt;mvp(p,inp.mx/l*sp,inp.my/l*sp,M)}}}
+  // empurrão: bateu em parede ou borda = dano extra + bônus de velocidade para o monge
+  if(p.pd>0&&s.over<0){let rem=Math.min(p.pd,MG.psp*dt),slam=0;p.pd-=rem;
+   while(rem>.01&&!slam){const u=Math.min(4,rem);rem-=u;slam=pmv(p,u,M,B)}
+   if(slam){p.pd=0;const w=p.pw;p.pw=-1;E('mw',p.x,p.y,0,w>=0?w:0);hit(s,p,MG.wdmg);if(w>=0)s.p[w].mb=MG.wt}}
+  // a borda fechando empurra os jogadores para dentro
+  if(!full){p.x=Math.max(B[0]+15,Math.min(B[2]-15,p.x));p.y=Math.max(B[1]+15,Math.min(B[3]-15,p.y))}});
+ // pedaços: deslizam, param em paredes/borda, causam dano no inimigo do dono se estiverem rápidos
+ s.pc=s.pc.filter(c=>{
+  if(!full&&(c.x<B[0]||c.x>B[2]||c.y<B[1]||c.y>B[3]))return false;   // esmagado pela borda
+  if(c.vx||c.vy){
+   const tx=c.x+c.vx*dt,ty=c.y+c.vy*dt,
+    nx=Math.max(B[0]+c.w/2,Math.min(B[2]-c.w/2,tx)),ny=Math.max(B[1]+c.h/2,Math.min(B[3]-c.h/2,ty));
+   if(nx!=tx||blkb(M,nx,c.y,3))c.vx=0;else c.x=nx;
+   if(ny!=ty||blkb(M,c.x,ny,3))c.vy=0;else c.y=ny;
+   const f=Math.exp(-MG.fr*dt);c.vx=Math.round(c.vx*f*10)/10;c.vy=Math.round(c.vy*f*10)/10;
+   if(Math.hypot(c.vx,c.vy)<25){c.vx=c.vy=0;c.o=-1}
+   c.x=Math.round(c.x*10)/10;c.y=Math.round(c.y*10)/10;
+   if(c.o>=0&&Math.hypot(c.vx,c.vy)>120){const e=s.p[1-c.o];
+    if(D(c,e)<16+Math.max(c.w,c.h)/2){hit(s,e,MG.pdmg);E('mp',c.x,c.y,0,c.o);return false}}}
+  return true})};
+
+// ---- IA: empurra de perto e usa a ult assim que carrega ----
+const _ai=aiStep;
+aiStep=function(s,dt){_ai(s,dt);const p=s.p[1],e=s.p[0];
+ if(p.c!='monge'||p.fz>0||p.stn>0||p.pd>0)return;
+ if(p.cd<=0&&D(p,e)<MG.range-10)in1.pr.push(['a']);
+ if(p.ult>=100)in1.pr.push(['u'])};
+
+// ---- desenho: pedaços, faixa do monge, aura de velocidade, rastro do empurrão e borda ----
+const _draw=draw;
+draw=function(dt){
+ if(S&&S.p)sync(S);
+ _draw(dt);
+ if(!S||!S.p||S.over>=0)return;
+ const M=MAPS[S.map];
+ (S.pc||[]).forEach(c=>{
+  if(c.o>=0&&Math.hypot(c.vx,c.vy)>60){
+   PT.push({x:c.x,y:c.y,vx:R(-20,20),vy:R(-20,20),l:.25,m:.25,c:'#9fd',z:4});
+   x.globalAlpha=.3;x.fillStyle='#9fd';x.beginPath();x.arc(c.x,c.y,Math.max(c.w,c.h)*.9,0,7);x.fill();x.globalAlpha=1}
+  x.fillStyle=M.p[0];x.fillRect(c.x-c.w/2,c.y-c.h/2,c.w,c.h);
+  x.strokeStyle=M.c;x.lineWidth=1.5;x.strokeRect(c.x-c.w/2,c.y-c.h/2,c.w,c.h)});
+ S.p.forEach((p,i)=>{const v=VP[i];
+  if(p.c=='monge'){
+   x.fillStyle='#f93';x.fillRect(v.x-13,v.y+4,26,4);
+   if(p.mb>0){x.globalAlpha=.5+.3*Math.sin(S.t*12);x.strokeStyle='#6fc';x.lineWidth=3;x.beginPath();x.arc(v.x,v.y,22,0,7);x.stroke();x.globalAlpha=1;
+    if(Math.random()<dt*60)PT.push({x:v.x,y:v.y,vx:0,vy:0,l:.25,m:.25,c:'#6fc',z:10})}}
+  if(p.pd>0)for(let k=0;k<2;k++)PT.push({x:v.x+R(-6,6),y:v.y+R(-6,6),vx:R(-40,40),vy:R(-40,40),l:.3,m:.3,c:'#9fd',z:6})});
+ // borda do mapa
+ const B=S.bd;
+ if(B&&(B[0]>.5||B[1]>.5||B[2]<W-.5||B[3]<H-.5)){
+  const[l,t,r,b]=B;
+  x.save();x.beginPath();x.rect(0,0,W,H);x.rect(6,6,216,52);x.rect(W-222,6,216,52);x.clip('evenodd'); // preserva o HUD
+  x.fillStyle='rgba(0,0,0,.78)';
+  x.fillRect(0,0,W,t);x.fillRect(0,b,W,H-b);x.fillRect(0,t,l,b-t);x.fillRect(r,t,W-r,b-t);
+  x.restore();
+  x.save();x.shadowColor='#6fc';x.shadowBlur=14;x.strokeStyle='#9fd';x.globalAlpha=.8+.2*Math.sin(S.t*6);x.lineWidth=4;
+  x.strokeRect(l,t,r-l,b-t);x.restore()}};
+
+// ---- card de seleção ----
+const ck='monge',cb=document.createElement('div');cb.className='cd';cb.style.setProperty('--c',C[ck][2]);
+cb.innerHTML=`<span class=o></span><b>${ck}</b><small>${INF[ck]}</small><em>❤ ${C[ck][0]} · ➤ ${C[ck][1]}</em>`;
+cb.onclick=()=>{au();SF.ui();picks[me]=ck;if(vsAI&&!picks[1])picks[1]=K[Math.floor(Math.random()*K.length)];send({t:'pick',c:ck});$('ps').textContent='Você: '+ck+' — aguardando o oponente...';
+ document.querySelectorAll('.cd').forEach(c=>c.classList.toggle('on',c==cb));chk()};
+$('ch').appendChild(cb);
+})();
+// ===== EXTRAS: guerreiro com 100 de vida · mapa Túneis · Torneio vs IA =====
+(()=>{
+// ---- guerreiro: 100 de vida (e o card de seleção mostra o valor novo) ----
+C.guerreiro[0]=100;
+document.querySelectorAll('.cd').forEach(c=>{const b=c.querySelector('b');
+ if(b&&b.textContent=='guerreiro')c.querySelector('em').textContent='❤ '+C.guerreiro[0]+' · ➤ '+C.guerreiro[1]});
+
+// ---- mapa Túneis: dois corredores laterais e um corredor central com pilares ----
+MAPS.push({n:'Túneis',a:'#262a3c',b:'#07080f',c:'#fa6',p:['#7a8095','#363b50'],
+ o:[[200,100,400,24],[200,326,400,24],[330,124,24,70],[446,256,24,70],[388,0,24,40],[388,410,24,40]]});
+// o sorteio de mapa do jogo era fixo em 3; agora sorteia entre todos os mapas
+const _setup=setup;
+setup=function(m){return _setup(Math.floor(Math.random()*MAPS.length))};
+
+// ---- TORNEIO vs IA (8 lutadores, chaveamento de quartas, semifinal e final) ----
+// as lutas entre as IAs são decididas na sorte; só as suas são jogadas
+let T=null;
+const sty=document.createElement('style');
+sty.textContent=`#tn{display:none;position:fixed;inset:0;z-index:20;background:radial-gradient(circle at 50% 20%,#1e2748,#080a12 80%);flex-direction:column;align-items:center;justify-content:center;padding:12px;text-align:center}
+#tn h2{margin:0 0 4px;font-size:28px;letter-spacing:4px;color:#fd4}
+#tn p{margin:2px 0 10px;opacity:.8;font-size:14px}
+.tb{display:flex;gap:16px;justify-content:center;margin-bottom:12px}
+.tcol{display:flex;flex-direction:column}
+.tcol h4{margin:0 0 6px;font-size:12px;opacity:.6;text-transform:uppercase;letter-spacing:1px}
+.tc{flex:1;display:flex;flex-direction:column;justify-content:space-around;gap:8px}
+.tm{width:118px;border:2px solid #fff2;border-radius:10px;background:#ffffff0d;overflow:hidden;font-size:13px}
+.tm.tl{border-color:#fd4;box-shadow:0 0 14px #fd48}
+.tm div{padding:5px 6px;text-transform:capitalize;font-weight:600}
+.tm div+div{border-top:1px solid #fff2}
+.tm .tw{background:#3a7a3a66}
+.tm .tx{opacity:.4;text-decoration:line-through}`;
+document.head.appendChild(sty);
+const TN=document.createElement('div');TN.id='tn';document.body.appendChild(TN);
+
+const row=(p,w)=>`<div class="${w===true?'tw':w===false?'tx':''}">${p?`<span style="color:${C[p.c][2]}">${p.y?'⭐ ':''}${p.c}</span>`:'<span style="opacity:.4">?</span>'}</div>`;
+const mh=(m,live)=>{const d=m.w!=null;return `<div class="tm${live?' tl':''}">${row(m.a,d?m.w==0:null)}${row(m.b,d?m.w==1:null)}</div>`};
+const mine=m=>m.a&&m.b&&(m.a.y||m.b.y);
+const winners=r=>T.rounds[r].map(m=>m.w==0?m.a:m.b);
+
+function showT(){
+ const names=['Quartas','Semifinal','Final'],end=T.champ||T.out;let head,sub;
+ if(T.champ){head='🏆 CAMPEÃO!';sub='Você venceu o torneio com '+T.my}
+ else if(T.out){const f=T.rounds[2][0],w=f.w==0?f.a:f.b;head='Eliminado';sub='Você caiu '+['nas quartas','na semifinal','na final'][T.r]+' · campeão: '+w.c}
+ else{head='TORNEIO';sub=names[T.r]+' · você é o '+T.my}
+ TN.innerHTML=`<h2>${head}</h2><p>${sub}</p><div class=tb>${T.rounds.map((rd,i)=>
+  `<div class=tcol><h4>${names[i]}</h4><div class=tc>${rd.map(m=>mh(m,!end&&i==T.r&&mine(m)&&m.w==null)).join('')}</div></div>`).join('')}</div>
+  <button id=tgo>${end?'Voltar ao menu':'Lutar!'}</button>`;
+ TN.style.display='flex';
+ $('tgo').onclick=()=>{SF.ui();end?quitT():fight()};
+ if(T.champ)SF.win()}
+
+// abre a rodada: decide na sorte as lutas entre IAs e mostra o chaveamento
+function startRound(){T.rounds[T.r].forEach(m=>{if(!mine(m))m.w=Math.random()<.5?0:1});showT()}
+
+// depois da escolha do personagem: monta o chaveamento com você + 7 rivais diferentes
+function begin(c){T.pending=false;T.my=c;T.r=0;T.inMatch=false;
+ const all=[{c,y:1},...K.filter(k=>k!=c).sort(()=>Math.random()-.5).slice(0,7).map(k=>({c:k,y:0}))].sort(()=>Math.random()-.5);
+ T.rounds=[4,2,1].map(n=>Array.from({length:n},()=>({a:null,b:null,w:null})));
+ T.rounds[0].forEach((m,i)=>{m.a=all[2*i];m.b=all[2*i+1]});
+ startRound()}
+
+// começa a sua luta (você é sempre o jogador 0, a IA é o jogador 1)
+function fight(){const m=T.rounds[T.r].find(mine),opp=m.a.y?m.b:m.a;
+ TN.style.display='none';picks=[];picks[0]=T.my;picks[1]=opp.c;T.inMatch=true;$('rm').textContent='Continuar';_chk()}
+
+// fim da luta: registra o resultado e avança (ou encerra) o torneio
+function endMatch(){SF.ui();const won=S&&S.over==0;T.inMatch=false;
+ reset();$('p').style.display='none';$('rm').textContent='Jogar de novo';
+ const m=T.rounds[T.r].find(mine);m.w=won?(m.a.y?0:1):(m.a.y?1:0);
+ if(!won){ // eliminado: sorteia o resto só para mostrar quem foi o campeão
+  for(let r=T.r;r<2;r++){const w=winners(r);T.rounds[r+1].forEach((q,i)=>{q.a=w[2*i];q.b=w[2*i+1];q.w=Math.random()<.5?0:1})}
+  T.out=true;showT();return}
+ if(T.r==2){T.champ=true;showT();return}
+ const w=winners(T.r);T.rounds[T.r+1].forEach((q,i)=>{q.a=w[2*i];q.b=w[2*i+1]});
+ T.r++;startRound()}
+
+function quitT(){TN.style.display='none';T=null;vsAI=false;$('rm').textContent='Jogar de novo';$('st').textContent='';$('m').style.display=''}
+
+// no torneio, escolher o personagem monta o chaveamento em vez de começar a luta direto
+const _chk=chk;
+chk=function(){if(T&&T.pending){if(picks[0])begin(picks[0]);return}_chk()};
+// no torneio, o botão do fim da luta ("Continuar") volta ao chaveamento
+const _again=again;
+again=function(){if(T&&T.inMatch){endMatch();return}_again()};
+
+// botão no menu
+const bt=document.createElement('button');bt.textContent='🏆 Torneio vs IA';
+bt.onclick=()=>{au();SF.ui();vsAI=true;me=0;conn=null;if(peer){peer.destroy();peer=null}
+ T={pending:true};$('m').style.display='none';$('p').style.display='block';$('ps').textContent='Torneio — escolha seu personagem'};
+const ab=[...$('m').querySelectorAll('button')].find(b=>(b.getAttribute('onclick')||'').includes("'ai'"));
+if(ab)ab.after(document.createElement('br'),bt);else $('m').appendChild(bt);
+})();
 </script></body></html>
